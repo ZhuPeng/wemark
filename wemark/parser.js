@@ -3,8 +3,19 @@ var parser = new Remarkable({
 	html: true
 });
 var prism = require('./prism');
+var idDict = {}
+
+function urlModify(baseurl, url) {
+  if (url == "" || url == undefined || url.startsWith('http')) {
+    return url
+  }
+  return baseurl + url;
+}
+
+var reg = new RegExp("<br/>", "g"); 
 
 function parse(md, options){
+    md = md.replace(reg, '\n')
 	if(!options) options = {};
 	var tokens = parser.parse(md, {});
 
@@ -23,14 +34,32 @@ function parse(md, options){
 		var ret = [];
 		var env;
 		var tokenData = {};
-
-		if(inlineToken.type === 'htmlblock'){
+		if(inlineToken.type === 'htmlblock' || (inlineToken.type === 'inline' && inlineToken.content.startsWith('<'))){
 			// 匹配video
 			// 兼容video[src]和video > source[src]
 			var videoRegExp = /<video.*?src\s*=\s*['"]*([^\s^'^"]+).*?(poster\s*=\s*['"]*([^\s^'^"]+).*?)?(?:\/\s*>|<\/video>)/g;
-
-			var match;
-			var html = inlineToken.content.replace(/\n/g, '');
+            var imgRegExp = /<img.*?src\s*=\s*['"]*([^\s^'^"]+).*?(?:\/\s*|<\/img)?>/g;
+            var p = /<p>(.*?)<\/p>/g;
+            var h2 = /<h2.*?>(.*?)<\/h2>/g;
+            
+	          	var match;
+	          	var html = inlineToken.content.replace(/\n/g, '');
+            // console.log('html: ', html)
+            while(match = imgRegExp.exec(html)) {
+              if (match[1]) {
+                ret.push({type: 'image', src: urlModify(options.baseurl, match[1])});
+              }
+            }
+            while(match = p.exec(html)) {
+              if (match[1]) {
+                ret.push({type: 'text', content: match[1]})
+              }
+            }
+            while (match = h2.exec(html)) {
+              if (match[1]) {
+                ret.push({ type: 'text', content: match[1] })
+              }
+            }
 			while(match = videoRegExp.exec(html)){
 				if(match[1]){
 					var retParam = {
@@ -46,12 +75,12 @@ function parse(md, options){
 				}
 			}
 		}else{
-			// console.log(inlineToken);
 			inlineToken.children && inlineToken.children.forEach(function(token, index){
 				if(['text', 'code'].indexOf(token.type) > -1){
 					ret.push({
 						type: env || token.type,
 						content: token.content,
+            id: idDict[token.content] || '',
 						data: tokenData
 					});
 					env = '';
@@ -87,11 +116,15 @@ function parse(md, options){
 						tokenData = {
 							href: token.href
 						};
+            if (token.href.startsWith('#')) {
+              // console.log("link:", token, token.href, inlineToken.children[index + 1].content)
+              idDict[inlineToken.children[index+1].content] = token.href.substr(1)
+            }
 					}
 				}else if(token.type === 'image'){
 					ret.push({
 						type: token.type,
-						src: token.src
+            src: urlModify(options.baseurl, token.src)
 					});
 				}
 			});
@@ -137,53 +170,54 @@ function parse(md, options){
 		}else if(blockToken.type === 'fence' || blockToken.type === 'code'){
 			content = blockToken.content;
 			var highlight = false;
+            if (!blockToken.params){blockToken.params = 'python'}
 			if(options.highlight && blockToken.params && prism.languages[blockToken.params]){
 				content = prism.tokenize(content, prism.languages[blockToken.params]);
 				highlight = true;
 			}
 
-			const flattenTokens = (tokensArr, result = [], parentType = '') => {
-				if (Array.isArray(tokensArr)) {
-					tokensArr.forEach(el => {
-						if (typeof el === 'object') {
-							// el.type = parentType + ' wemark_inline_code_' + el.type;
-							if(Array.isArray(el.content)){
-								flattenTokens(el.content, result, el.type);
-							}else{
-								flattenTokens(el, result, el.type);
-							}
-						} else {
-							const obj = {};
-							obj.type = parentType || 'text';
-							// obj.type = parentType + ' wemark_inline_code_';
-							obj.content = el;
-							result.push(obj);
-						}
-					})
-					return result
-				} else {
-					result.push(tokensArr)
-					return result
-				}
-			}
+            const flattenTokens = (tokensArr, result = [], parentType = '') => {
+                if (Array.isArray(tokensArr)) {
+                    tokensArr.forEach(el => {
+                        if (typeof el === 'object') {
+                            // el.type = parentType + ' wemark_inline_code_' + el.type;
+                            if(Array.isArray(el.content)){
+                                flattenTokens(el.content, result, el.type);
+                            }else{
+                                flattenTokens(el, result, el.type);
+                            }
+                        } else {
+                            const obj = {};
+                            obj.type = parentType || 'text';
+                            // obj.type = parentType + ' wemark_inline_code_';
+                            obj.content = el;
+                            result.push(obj);
+                        }
+                    })
+                    return result
+                } else {
+                    result.push(tokensArr)
+                    return result
+                }
+            }
 
-			if(highlight){
-				var tokenList = content;
-				content = [];
-				tokenList.forEach((token) => {
-					// let contentListForToken = [];
-					if(Array.isArray(token.content)){
-						content = content.concat(flattenTokens(token.content, [], ''));
-					}else{
-						content.push(token);
-					}
-				});
-			}
-			// flatten nested tokens in html
-			// if (blockToken.params === 'html') {
-				// content = flattenTokens(content)
-			// }
-			// console.log(content);
+            if(highlight){
+                var tokenList = content;
+                content = [];
+                tokenList.forEach((token) => {
+                    // let contentListForToken = [];
+                    if(Array.isArray(token.content)){
+                        content = content.concat(flattenTokens(token.content, [], ''));
+                    }else{
+                        content.push(token);
+                    }
+                });
+            }
+            // flatten nested tokens in html
+            // if (blockToken.params === 'html') {
+            // content = flattenTokens(content)
+            // }
+            // console.log(content);
 
 			return {
 				type: 'code',
@@ -228,7 +262,7 @@ function parse(md, options){
 		}else if(blockToken.type === 'td_open'){
 			tmp.content.push({
 				type: 'table_td',
-				content: getInlineContent(tokens[index+1]).map(function(inline){return inline.content;}).join('')
+				content: getInlineContent(tokens[index+1])
 			});
 		}
 	};

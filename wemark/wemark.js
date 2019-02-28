@@ -14,6 +14,10 @@ Component({
 			type: String,
 			value: 'wemark'
 		},
+        baseurl: {
+           type: String,
+           value: ''
+        },
 		link: {
 			type: Boolean,
 			value: false
@@ -28,10 +32,31 @@ Component({
 		richTextNodes: []
     },
     methods: {
+        onTap(e) {
+            var clickurl = e.target.dataset.text
+            if(clickurl.startsWith('#')) {
+              console.log("onTap url:", clickurl)
+              var query = this.createSelectorQuery()
+              query.select(clickurl).boundingClientRect()
+              query.selectViewport().scrollOffset()
+              query.exec(function (res) {
+                if (res.length < 2) {return}
+                if (res[0] == null) {return}
+                wx.pageScrollTo({
+                  scrollTop: (res[0].top||0) + res[1].scrollTop,
+                  duration: 300
+                })
+              })
+            } else {
+              this.triggerEvent('click', e)   
+            }
+        },
+      
         parseMd(){
 			if (this.data.md) {
 				var parsedData = parser.parse(this.data.md, {
 					link: this.data.link,
+                    baseurl: this.data.baseurl,
 					highlight: this.data.highlight
 				});
 				// console.log('parsedData:', parsedData);
